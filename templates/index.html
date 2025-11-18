@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Smart Savings Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+</head>
+<body>
+  <!-- small floating badge -->
+  <div class="dev-badge">Built by Vamsi</div>
+
+  <header>
+    <h1>Smart Savings</h1>
+    <nav>
+      <a href="/" class="active">Home</a>
+      <a href="/admin">Admin</a>
+    </nav>
+  </header>
+
+  <div class="kpis card">
+    <h2>Account Overview</h2>
+    <div class="kpi-row">
+      <div class="kpi">
+        <span>Balance</span>
+        <strong>${{ '%.2f'|format(kpi.balance) }}</strong>
+      </div>
+      <div class="kpi">
+        <span>Monthly Spend</span>
+        <strong>${{ '%.2f'|format(kpi.mtd) }}</strong>
+      </div>
+      <div class="kpi">
+        <span>Forecast (EOM)</span>
+        <strong id="forecast">${{ '%.2f'|format(kpi.forecast) }}</strong>
+      </div>
+    </div>
+    <button id="predictBtn">Predict (AI)</button>
+    <pre id="predictOut" class="muted"></pre>
+  </div>
+
+  <div class="charts">
+    <div class="panel card">
+      <h3>12-Month Trend</h3>
+      <canvas id="trend"></canvas>
+    </div>
+    <div class="panel card">
+      <h3>Category Breakdown</h3>
+      <canvas id="pie"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Recent Transactions</h3>
+    <table class="tx-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Category</th>
+          <th>Description</th>
+          <th style="text-align:right;">Amount ($)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% if transactions and transactions|length > 0 %}
+          {% for tx in transactions[-10:] %}
+          <tr>
+            <td>{{ tx.date }}</td>
+            <td>{{ tx.category }}</td>
+            <td>{{ tx.description }}</td>
+            <td style="text-align:right;">{{ '%.2f'|format(tx.amount) }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="4">No transactions yet. Upload a CSV or Bank PDF to see data here.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card upload-card">
+    <h3>Upload Transactions</h3>
+    <p class="upload-hint">
+      Drop a file or click below. CSV for manual exports, PDF for bank statements.
+    </p>
+
+    <div class="upload-grid">
+      <!-- CSV dropzone -->
+      <div class="dropzone" id="csvDrop">
+        <div class="icon">📊</div>
+        <div class="dz-title">CSV Upload</div>
+        <div class="dz-sub">date, description, amount (category optional)</div>
+        <form id="csvForm">
+          <input type="file" id="csvInput" name="file" accept=".csv" hidden>
+          <button type="button" id="csvButton">Choose CSV</button>
+        </form>
+      </div>
+
+      <!-- PDF dropzone -->
+      <div class="dropzone" id="pdfDrop">
+        <div class="icon pdf">📄</div>
+        <div class="dz-title">Bank Statement (PDF)</div>
+        <div class="dz-sub">Tables with Date · Description · Amount</div>
+        <form id="pdfForm">
+          <input type="file" id="pdfInput" name="file" accept="application/pdf" hidden>
+          <button type="button" id="pdfButton">Choose PDF</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="preview">
+      <h4>Last Upload Result</h4>
+      <pre id="uploadResult"></pre>
+
+      <h4>Sample Parsed Rows</h4>
+      <table class="tx-table" id="previewTable" style="display:none;">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Category</th>
+            <th>Description</th>
+            <th style="text-align:right;">Amount ($)</th>
+          </tr>
+        </thead>
+        <tbody id="previewBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>Smart Savings © 2025 — Designed & Built by <strong>Vamsi Ogirala</strong></footer>
+
+  <!-- loading overlay -->
+  <div id="loadingOverlay" class="loading-overlay" style="display:none;">
+    <div class="spinner"></div>
+    <div class="loading-text">Processing your file…</div>
+  </div>
+
+  <script>
+    const pieData = {{ categories|tojson }};
+    const trendLabels = {{ trend_labels|tojson }};
+    const trendValues = {{ trend_values|tojson }};
+
+    // Trend chart
+    const tctx = document.getElementById('trend');
+    new Chart(tctx, {
+      type: 'line',
+      data: {
+        labels: trendLabels,
+        datasets: [{
+          label: 'Monthly Spend',
+          data: trendValues,
+          borderColor: '#22c55e',
+          fill: false,
+          tension: 0.3
+        }]
+      },
+      options: { responsive: true, plugins:{legend:{display:false}} }
+    });
+
+    // Pie chart
+    const pctx = document.getElementById('pie');
+    new Chart(pctx, {
+      type: 'pie',
+      data: {
+        labels: Object.keys(pieData),
+        datasets: [{
+          data: Object.values(pieData),
+          backgroundColor: ['#22c55e','#4ade80','#a3e635','#22d3ee','#60a5fa','#a855f7']
+        }]
+      },
+      options: { responsive: true }
+    });
+
+    // Predict AI
+    document.getElementById('predictBtn').addEventListener('click', async ()=>{
+      const r = await fetch('/api/predict');
+      const j = await r.json();
+      document.getElementById('forecast').textContent = `$${j.forecast.toFixed(2)}`;
+      document.getElementById('predictOut').textContent = JSON.stringify(j, null, 2);
+    });
+
+    // ---------- Upload helpers ----------
+    const loading = document.getElementById('loadingOverlay');
+    const uploadResult = document.getElementById('uploadResult');
+    const previewTable = document.getElementById('previewTable');
+    const previewBody = document.getElementById('previewBody');
+
+    function showLoading(show) {
+      loading.style.display = show ? 'flex' : 'none';
+    }
+
+    function renderSample(sample) {
+      previewBody.innerHTML = "";
+      if (!sample || sample.length === 0) {
+        previewTable.style.display = "none";
+        return;
+      }
+      sample.forEach(row => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${row.date}</td>
+          <td>${row.category}</td>
+          <td>${row.description}</td>
+          <td style="text-align:right;">${Number(row.amount).toFixed(2)}</td>
+        `;
+        previewBody.appendChild(tr);
+      });
+      previewTable.style.display = "table";
+    }
+
+    async function uploadFile(formEl, url) {
+      const fd = new FormData(formEl);
+      showLoading(true);
+      try {
+        const r = await fetch(url, { method:'POST', body:fd });
+        const j = await r.json();
+        uploadResult.textContent = JSON.stringify(j, null, 2);
+        renderSample(j.sample);
+        if (j.status === "ok") {
+          // small delay so user can see preview
+          setTimeout(()=>location.reload(), 1200);
+        }
+      } catch (err) {
+        uploadResult.textContent = "Error: " + err;
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    // CSV button + drop
+    const csvDrop = document.getElementById('csvDrop');
+    const csvInput = document.getElementById('csvInput');
+    const csvButton = document.getElementById('csvButton');
+    const csvForm = document.getElementById('csvForm');
+
+    csvButton.addEventListener('click', ()=> csvInput.click());
+    csvInput.addEventListener('change', ()=> {
+      if (csvInput.files.length > 0) {
+        uploadFile(csvForm, '/api/upload');
+      }
+    });
+
+    csvDrop.addEventListener('dragover', (e)=>{
+      e.preventDefault();
+      csvDrop.classList.add('dragover');
+    });
+    csvDrop.addEventListener('dragleave', ()=>{
+      csvDrop.classList.remove('dragover');
+    });
+    csvDrop.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      csvDrop.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) {
+        csvInput.files = e.dataTransfer.files;
+        uploadFile(csvForm, '/api/upload');
+      }
+    });
+
+    // PDF button + drop
+    const pdfDrop = document.getElementById('pdfDrop');
+    const pdfInput = document.getElementById('pdfInput');
+    const pdfButton = document.getElementById('pdfButton');
+    const pdfForm = document.getElementById('pdfForm');
+
+    pdfButton.addEventListener('click', ()=> pdfInput.click());
+    pdfInput.addEventListener('change', ()=> {
+      if (pdfInput.files.length > 0) {
+        uploadFile(pdfForm, '/api/upload-pdf');
+      }
+    });
+
+    pdfDrop.addEventListener('dragover', (e)=>{
+      e.preventDefault();
+      pdfDrop.classList.add('dragover');
+    });
+    pdfDrop.addEventListener('dragleave', ()=>{
+      pdfDrop.classList.remove('dragover');
+    });
+    pdfDrop.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      pdfDrop.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) {
+        pdfInput.files = e.dataTransfer.files;
+        uploadFile(pdfForm, '/api/upload-pdf');
+      }
+    });
+  </script>
+</body>
+</html>
