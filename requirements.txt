@@ -7,4 +7,3 @@ pdfplumber
 python-multipart
 pdfplumber==0.11.0
 pypdfium2==5.0.0
-pdfminer.six==20240714
