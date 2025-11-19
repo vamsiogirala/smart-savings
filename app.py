@@ -2,18 +2,19 @@ from collections import defaultdict, OrderedDict
 from datetime import datetime
 import io
 import time
-import pandas as pd
-import pdfplumber  # 👈 for PDF parsing
 
+import pandas as pd
+import pdfplumber
 from fastapi import FastAPI, Request, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from database import init_db, SessionLocal, Transaction
+from parsers import detect_bank, parse_boa_pdf
 
 app = FastAPI(title="Smart Savings")
-init_db()  # make sure DB + table exist
+init_db()
 
 # static + templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -23,9 +24,10 @@ APP_START_TS = time.time()
 
 
 # ---------- helpers ----------
+
 def auto_categorize(description: str, amount: float | None = None) -> str:
     """
-    Very simple rule-based 'AI' categorizer based on keywords.
+    Very simple rule-based categorizer based on keywords.
     Good enough to demo intelligence to your professor.
     """
     desc = (description or "").lower()
@@ -46,7 +48,6 @@ def auto_categorize(description: str, amount: float | None = None) -> str:
         if any(k in desc for k in keywords):
             return cat
 
-    # Fallbacks
     if amount is not None and amount < 0:
         return "Refund"
     return "Uncategorized"
@@ -72,10 +73,11 @@ def month_key(iso_date_str):
     return str(iso_date_str)[:7] if iso_date_str else ""
 
 
-def monthly_aggregate(txs, months=12):
+def monthly_aggregate(txs, months: int = 12):
     """Return OrderedDict of last <months> months with totals (0 when missing)."""
     now = datetime.now().replace(day=1)
-    labels = []
+    labels: list[str] = []
+
     # build month labels oldest -> newest
     for i in range(months - 1, -1, -1):
         year = now.year
@@ -103,9 +105,12 @@ def compute_kpis(txs):
     this_month = f"{today.year}-{today.month:02d}"
     mtd = sum(t["amount"] for t in txs if month_key(t["date"]) == this_month)
 
-    series = list(monthly_aggregate(txs, months=12).values())
-    avg = sum(series) / max(1, len(series))
-    trend = (series[-1] - series[0]) / max(1, len(series) - 1) if len(series) > 1 else 0.0
+    series_vals = list(monthly_aggregate(txs, months=12).values())
+    avg = sum(series_vals) / max(1, len(series_vals))
+    if len(series_vals) > 1:
+        trend = (series_vals[-1] - series_vals[0]) / max(1, len(series_vals) - 1)
+    else:
+        trend = 0.0
     forecast = avg + 0.5 * trend
 
     return {
@@ -118,7 +123,7 @@ def compute_kpis(txs):
 def category_breakdown(txs):
     if not txs:
         return {"Housing": 0, "Utilities": 0, "Dining": 0, "Savings": 0}
-    by_cat = defaultdict(float)
+    by_cat: dict[str, float] = defaultdict(float)
     for t in txs:
         by_cat[t["category"]] += float(t["amount"])
     return dict(sorted(by_cat.items(), key=lambda x: x[1], reverse=True))
@@ -129,7 +134,7 @@ def suggestion_tips(by_cat: dict):
         return ["Upload transactions to get personalized tips."]
     total = sum(by_cat.values()) or 1.0
     ranked = sorted(by_cat.items(), key=lambda x: x[1], reverse=True)
-    tips = []
+    tips: list[str] = []
     if ranked:
         top, top_amt = ranked[0]
         share = top_amt / total
@@ -140,6 +145,7 @@ def suggestion_tips(by_cat: dict):
 
 
 # ---------- pages ----------
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     txs = load_transactions()
@@ -154,13 +160,13 @@ def home(request: Request):
             "categories": cats,
             "trend_labels": list(series.keys()),
             "trend_values": list(series.values()),
-            "transactions": txs,  # for the table
+            "transactions": txs,
         },
     )
 
 
 @app.get("/admin", response_class=HTMLResponse)
-def admin(request: Request):
+def admin_page(request: Request):
     txs = load_transactions()
     cats = category_breakdown(txs)
     uptime_s = int(time.time() - APP_START_TS)
@@ -175,7 +181,18 @@ def admin(request: Request):
     )
 
 
+@app.get("/help", response_class=HTMLResponse)
+def help_page(request: Request):
+    return templates.TemplateResponse("help.html", {"request": request})
+
+
+@app.get("/about", response_class=HTMLResponse)
+def about_page(request: Request):
+    return templates.TemplateResponse("about.html", {"request": request})
+
+
 # ---------- CSV upload API ----------
+
 @app.post("/api/upload")
 async def api_upload(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".csv"):
@@ -188,20 +205,23 @@ async def api_upload(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail=f"CSV read error: {e}")
 
     cols = {c.lower(): c for c in df.columns}
-    # Try to support variants like "posting date", "transaction date"
-    date_col_candidates = ["date", "posting date", "transaction date"]
-    amount_col_candidates = ["amount", "debit", "credit"]
-    desc_col_candidates = ["description", "details", "memo"]
 
-    def pick_col(cands):
+    # Accept different header names
+    date_candidates = ["date", "posting date", "transaction date"]
+    amount_candidates = ["amount", "debit", "credit"]
+    desc_candidates = ["description", "details", "memo"]
+    cat_candidates = ["category", "type"]
+
+    def pick(cands):
         for cand in cands:
             if cand in cols:
                 return cols[cand]
         return None
 
-    date_col = pick_col(date_col_candidates)
-    amount_col = pick_col(amount_col_candidates)
-    desc_col = pick_col(desc_col_candidates)
+    date_col = pick(date_candidates)
+    amount_col = pick(amount_candidates)
+    desc_col = pick(desc_candidates)
+    cat_col = pick(cat_candidates)
 
     if not date_col or not amount_col:
         raise HTTPException(
@@ -209,26 +229,22 @@ async def api_upload(file: UploadFile = File(...)):
             detail="CSV must have at least a date column and an amount column.",
         )
 
-    # Normalize columns
     df["date_norm"] = pd.to_datetime(df[date_col], errors="coerce").dt.strftime("%Y-%m-%d")
-    df["desc_norm"] = df[desc_col].astype(str) if desc_col else ""
     df["amount_norm"] = pd.to_numeric(df[amount_col], errors="coerce")
-    df["category_norm"] = ""
+    df["desc_norm"] = df[desc_col].astype(str) if desc_col else ""
+    df["cat_norm"] = df[cat_col].astype(str) if cat_col else ""
 
     before = len(df)
     df = df.dropna(subset=["date_norm", "amount_norm"])
 
-    inserted_rows = []
+    inserted_rows: list[dict] = []
     with SessionLocal() as db:
         for _, row in df.iterrows():
             date = str(row["date_norm"])
             desc = str(row["desc_norm"]) if desc_col else ""
             amt = float(row["amount_norm"])
-            cat = ""
-            # try to see if there's an explicit "category" column
-            cat_col = cols.get("category")
-            if cat_col:
-                cat = str(row[cat_col] or "")
+            cat = str(row["cat_norm"]) if cat_col else ""
+
             if not cat or cat.strip().lower() in ("", "uncategorized", "other"):
                 cat = auto_categorize(desc, amt)
 
@@ -255,6 +271,7 @@ async def api_upload(file: UploadFile = File(...)):
 
 
 # ---------- PDF upload API ----------
+
 @app.post("/api/upload-pdf")
 async def upload_pdf(file: UploadFile = File(...)):
     if not file.filename.lower().endswith(".pdf"):
@@ -262,54 +279,96 @@ async def upload_pdf(file: UploadFile = File(...)):
 
     content = await file.read()
 
+    # 1) Try to detect bank from first page text
     try:
-        pdf = pdfplumber.open(io.BytesIO(content))
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            first_text = pdf.pages[0].extract_text() or ""
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"PDF read error: {e}")
 
-    extracted = []
+    bank = detect_bank(first_text)
+    extracted: list[dict] = []
 
-    for page in pdf.pages:
-        tables = page.extract_tables()
-        for table in tables:
-            for row in table:
-                if not row or len(row) < 3:
-                    continue
+    # 2) Bank of America → use special parser
+    if bank == "boa":
+        try:
+            df = parse_boa_pdf(content)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Bank of America parser failed: {e}",
+            )
 
-                raw_date = row[0]
-                raw_desc = row[1]
-                raw_amount = row[2]
+        if df.empty:
+            raise HTTPException(
+                status_code=400,
+                detail="Bank of America PDF parsed, but no transactions were found.",
+            )
 
-                # Clean date
-                date = pd.to_datetime(raw_date, errors="coerce")
-                if pd.isna(date):
-                    continue
-                date = date.strftime("%Y-%m-%d")
+        for _, row in df.iterrows():
+            extracted.append(
+                {
+                    "date": str(row["date"]),
+                    "description": str(row["description"]),
+                    "category": str(row.get("category", "")),
+                    "amount": float(row["amount"]),
+                }
+            )
+    else:
+        # 3) Fallback: generic table reader (for other banks)
+        try:
+            with pdfplumber.open(io.BytesIO(content)) as pdf:
+                for page in pdf.pages:
+                    tables = page.extract_tables()
+                    if not tables:
+                        continue
+                    for table in tables:
+                        if not table or len(table) < 2:
+                            continue
+                        for row in table[1:]:
+                            if not row or len(row) < 3:
+                                continue
 
-                # Clean amount (handle $, commas, etc.)
-                try:
-                    amount = float(str(raw_amount).replace(",", "").replace("$", ""))
-                except Exception:
-                    continue
+                            raw_date = row[0]
+                            raw_desc = row[1]
+                            raw_amount = row[2]
 
-                desc = raw_desc or ""
-                cat = auto_categorize(desc, amount)
+                            date = pd.to_datetime(raw_date, errors="coerce")
+                            if pd.isna(date):
+                                continue
+                            date_str = date.strftime("%Y-%m-%d")
 
-                extracted.append(
-                    {
-                        "date": date,
-                        "description": desc,
-                        "category": cat,
-                        "amount": amount,
-                    }
-                )
+                            try:
+                                amount = float(
+                                    str(raw_amount).replace(",", "").replace("$", "")
+                                )
+                            except Exception:
+                                continue
+
+                            desc = raw_desc or ""
+                            cat = auto_categorize(desc, amount)
+
+                            extracted.append(
+                                {
+                                    "date": date_str,
+                                    "description": desc,
+                                    "category": cat,
+                                    "amount": amount,
+                                }
+                            )
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Generic PDF parse error: {e}")
 
     if not extracted:
         raise HTTPException(
             status_code=400,
-            detail="No valid transaction table found in PDF (try another bank format).",
+            detail=(
+                "No valid transaction rows found in PDF. "
+                "Parser expects lines that start with a date and end with an amount."
+            ),
         )
 
+    # 4) Insert into DB
     with SessionLocal() as db:
         for row in extracted:
             tx = Transaction(
@@ -324,13 +383,57 @@ async def upload_pdf(file: UploadFile = File(...)):
     sample = extracted[:5]
     return {
         "status": "ok",
+        "bank_detected": bank,
         "inserted": len(extracted),
         "sample": sample,
         "message": "PDF extracted successfully.",
     }
 
 
-# ---------- prediction API ----------
+# ---------- PDF debug API ----------
+
+@app.post("/api/debug-pdf")
+async def debug_pdf(file: UploadFile = File(...)):
+    """
+    Debug endpoint: returns the first ~40 text lines from the PDF
+    so we can see the real layout and design regex accordingly.
+    """
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Please upload a PDF file")
+
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read uploaded file: {e!r}")
+
+    try:
+        all_lines: list[str] = []
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            for page_index, page in enumerate(pdf.pages[:2]):  # first 2 pages only
+                text = page.extract_text() or ""
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    all_lines.append(f"[p{page_index + 1}] {line}")
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"PDF parse error in debug endpoint: {e!r}",
+        )
+
+    sample_lines = all_lines[:40]
+    bank_guess = detect_bank("\n".join(sample_lines)) if sample_lines else "unknown"
+
+    return {
+        "bank_guess": bank_guess,
+        "line_count": len(all_lines),
+        "sample_lines": sample_lines,
+    }
+
+
+# ---------- prediction & health ----------
+
 @app.get("/api/predict")
 def api_predict():
     txs = load_transactions()
@@ -352,7 +455,8 @@ def health():
     return {"status": "ok", "uptime_seconds": int(time.time() - APP_START_TS)}
 
 
-# ---------- smoke test: add a sample transaction ----------
+# ---------- smoke test ----------
+
 @app.get("/add-transaction")
 def add_transaction():
     with SessionLocal() as db:

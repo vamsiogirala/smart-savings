@@ -1,8 +1,7 @@
 fastapi
-uvicorn[standard]
+uvicorn
 jinja2
 sqlalchemy
 pandas
 pdfplumber
 python-multipart
-

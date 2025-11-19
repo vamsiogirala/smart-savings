@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Smart Savings – About</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="admin">
+  <div class="dev-badge">Built by Vamsi</div>
+
+  <header>
+    <h1>Smart Savings</h1>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/admin">Admin</a>
+      <a href="/help">Help</a>
+      <a href="/about" class="active">About</a>
+    </nav>
+  </header>
+
+  <div class="card">
+    <h2>About Smart Savings</h2>
+    <p class="upload-hint">
+      Smart Savings is a prototype personal finance dashboard built as part of my
+      M.S. in Computer Science project under the supervision of Dr. Fuad Abu Zahra.
+    </p>
+
+    <h3>System Description</h3>
+    <ul>
+      <li>Reads financial transactions from <strong>CSV files</strong> and selected <strong>bank PDFs</strong>.</li>
+      <li>Stores data in a local SQLite database using SQLAlchemy.</li>
+      <li>Displays monthly spending trends and category breakdown charts.</li>
+      <li>Provides a simple AI-style forecast and savings tips.</li>
+      <li>Includes an Admin view with basic system statistics.</li>
+    </ul>
+
+    <h3>Technologies Used</h3>
+    <ul>
+      <li><strong>Backend:</strong> Python, FastAPI</li>
+      <li><strong>Database:</strong> SQLite (SQLAlchemy ORM)</li>
+      <li><strong>Frontend:</strong> HTML, CSS, JavaScript, Chart.js</li>
+      <li><strong>File Processing:</strong> pandas (CSV), pdfplumber (PDF)</li>
+      <li><strong>Deployment (prototype):</strong> Gunicorn/Uvicorn on a free cloud service</li>
+    </ul>
+
+    <h3>Current Version</h3>
+    <ul>
+      <li><strong>Version:</strong> 1.0 (Prototype)</li>
+      <li><strong>Status:</strong> Single-user prototype, running locally and on a public demo URL.</li>
+      <li><strong>Scope:</strong> Demonstrate end-to-end flow: upload → parse → store → visualize → basic prediction.</li>
+    </ul>
+
+    <h3>Planned Future Enhancements</h3>
+    <ul>
+      <li>User authentication (login, roles, multiple users).</li>
+      <li>Support for more bank PDF formats and better OCR-based parsing for scanned statements.</li>
+      <li>More advanced ML model for forecasting (e.g., time-series model).</li>
+      <li>Mobile-friendly responsive layout and PWA support.</li>
+      <li>Export reports as PDF or Excel.</li>
+    </ul>
+
+    <h3>Author</h3>
+    <p>
+      <strong>Developer:</strong> Vamsi Ogirala<br>
+      <strong>Program:</strong> M.S. in Computer Science<br>
+      <strong>Role:</strong> Full-stack + data processing + basic AI logic.
+    </p>
+  </div>
+
+  <footer>Smart Savings © 2025 — Version 1.0 Prototype • Vamsi Ogirala</footer>
+</body>
+</html>

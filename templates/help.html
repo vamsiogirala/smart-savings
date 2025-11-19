@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Smart Savings – Help</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="admin">
+  <div class="dev-badge">Built by Vamsi</div>
+
+  <header>
+    <h1>Smart Savings</h1>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/admin">Admin</a>
+      <a href="/help" class="active">Help</a>
+      <a href="/about">About</a>
+    </nav>
+  </header>
+
+  <div class="card">
+    <h2>How to Use Smart Savings</h2>
+    <p class="upload-hint">
+      This page explains how a normal user should use the system step by step.
+    </p>
+
+    <h3>1. Home Dashboard</h3>
+    <ul>
+      <li><strong>Balance</strong> – a fixed example balance (for demo).</li>
+      <li><strong>Monthly Spend</strong> – total spending for the current month from your transactions.</li>
+      <li><strong>Forecast (EOM)</strong> – an estimated end-of-month spending based on the last 12 months.</li>
+      <li><strong>12-Month Trend</strong> – line chart of monthly totals.</li>
+      <li><strong>Category Breakdown</strong> – pie chart of spending by category (Dining, Groceries, etc.).</li>
+      <li><strong>Recent Transactions</strong> – table with the most recent parsed transactions.</li>
+    </ul>
+
+    <h3>2. Uploading CSV Files</h3>
+    <ol>
+      <li>Download a CSV export from your bank (most banks have an “Export” button).</li>
+      <li>On the <strong>Home</strong> page, scroll to <strong>Upload Transactions</strong>.</li>
+      <li>Under <strong>CSV Upload</strong>, click <strong>Choose CSV</strong> and select your file.</li>
+      <li>The system will:
+        <ul>
+          <li>Read the date, description, and amount.</li>
+          <li>Try to detect the correct columns even if they are named “Posting Date” or “Transaction Date.”</li>
+          <li>Auto-categorize rows using simple rules (Dining, Groceries, Transport, etc.).</li>
+          <li>Insert transactions into the database and show a <strong>sample preview</strong>.</li>
+        </ul>
+      </li>
+      <li>After a short delay, the page reloads and your charts + table are refreshed.</li>
+    </ol>
+
+    <h3>3. Uploading Bank PDFs</h3>
+    <ol>
+      <li>Scroll to <strong>Bank Statement (PDF)</strong> on the Home page.</li>
+      <li>Click <strong>Choose PDF</strong> and select your bank statement.</li>
+      <li>The system will:
+        <ul>
+          <li>Try to detect the bank type from the first page text (e.g., Bank of America).</li>
+          <li>For supported formats, extract rows with <strong>Date – Description – Amount</strong>.</li>
+          <li>Auto-categorize them and insert into the database.</li>
+        </ul>
+      </li>
+      <li>The result appears in <strong>Last Upload Result</strong>:
+        <ul>
+          <li>If <strong>"status": "ok"</strong> – parsing worked, and the sample rows are shown.</li>
+          <li>If you see <strong>"detail": "No valid transaction rows found..."</strong> – your PDF layout is not supported.</li>
+        </ul>
+      </li>
+    </ol>
+
+    <p><strong>Important:</strong> Not all PDFs are text-based. Some banks provide scanned images or unusual layouts.  
+    In those cases, the safest option is to export a <strong>CSV file</strong> from online banking and use the CSV upload feature (which is more reliable).</p>
+
+    <h3>4. Using the AI Prediction Button</h3>
+    <ol>
+      <li>On the Home page, click the <strong>Predict (AI)</strong> button.</li>
+      <li>The system calls the <code>/api/predict</code> endpoint, which:
+        <ul>
+          <li>Looks at the last 12 months of totals.</li>
+          <li>Computes an average and trend.</li>
+          <li>Returns a forecast value, confidence score, and 3 simple saving tips.</li>
+        </ul>
+      </li>
+      <li>The forecast number updates and the JSON response is shown in the small code box.</li>
+    </ol>
+
+    <h3>5. When Something Goes Wrong</h3>
+    <ul>
+      <li>Check the <strong>Last Upload Result</strong> area – most errors are explained as JSON.</li>
+      <li>If the dashboard doesn’t change, try refreshing the page.</li>
+      <li>If the server stopped, restart it with:
+        <pre>cd C:\Users\vam66\smart-savings
+.venv\Scripts\activate
+uvicorn app:app --reload</pre>
+      </li>
+    </ul>
+  </div>
+
+  <footer>Smart Savings © 2025 — Help & User Guide • Vamsi Ogirala</footer>
+</body>
+</html>
